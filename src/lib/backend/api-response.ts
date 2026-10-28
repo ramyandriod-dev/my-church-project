@@ -70,9 +70,13 @@ export function errorResponse(error: unknown): NextResponse<ApiResponse> {
     );
   }
 
-  const message = (error as any)?.message || String(error);
-
+  // The real error is logged for the operator. What the client gets is a fixed
+  // message in production, so database or library details never leave the server.
   console.error("[Unhandled Error]", error);
+  const message =
+    process.env.NODE_ENV === "production"
+      ? "Something went wrong. Please try again."
+      : (error as any)?.message || String(error);
   return NextResponse.json(
     {
       success: false,

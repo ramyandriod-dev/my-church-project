@@ -5,19 +5,22 @@
  *
  * Dispatches verified events to church-management-realtime via Service Binding.
  * Security:
- * - Requires authentication
+ * - Requires the "attendance.create" permission (staff), not just a login: a member
+ *   must not be able to put events on the church's live dashboard
+ * - Only the "attendance.check_in" event type is accepted, with a size-capped payload
  * - Events are scoped strictly to the authenticated user's tenant
  */
 
-import { withAuth, successResponse } from "@/lib/backend";
+import { withPermission, successResponse } from "@/lib/backend";
+import { publishRealtimeSchema, validate } from "@/lib/backend/validation";
 
-export const POST = withAuth(async (request, _context, ctx) => {
-  const body = await request.json();
+export const POST = withPermission("attendance.create", async (request, _context, ctx) => {
+  const body = validate(publishRealtimeSchema, await request.json());
 
   const payload = {
-    type: body.type || "attendance.event",
+    type: body.type,
     tenantId: ctx.tenantId,
-    data: body.data || {},
+    data: body.data,
     timestamp: new Date().toISOString(),
   };
 

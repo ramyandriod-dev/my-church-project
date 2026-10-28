@@ -629,6 +629,21 @@ export const sendAnnouncementSchema = z.object({
   audience: announcementAudienceSchema,
 });
 
+/**
+ * Body of POST /api/realtime/publish. Only the one event type this endpoint is meant
+ * for is accepted, and the payload is capped, so a caller cannot invent event types
+ * or flood a church's realtime channel.
+ */
+export const publishRealtimeSchema = z
+  .object({
+    type: z.literal("attendance.check_in"),
+    data: z
+      .record(z.unknown())
+      .default({})
+      .refine((d) => JSON.stringify(d).length <= 4000, "Event data is too large"),
+  })
+  .strict();
+
 export const reserveSeatsSchema = z.object({
   sectionId: z.enum(["ground_left", "ground_center", "ground_right", "gallery"]),
   row: z.string().trim().min(1).max(4),

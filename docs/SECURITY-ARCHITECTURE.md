@@ -207,15 +207,15 @@ Listed deliberately, so your review time goes where it helps most.
    (`DEMO_LOGIN_ENABLED`), a simulated clock (`ENABLE_DEMO_CLOCK`), and a development-only
    auth bypass header that is ignored unless `NODE_ENV === "development"`. These must be
    off before real use.
-9. **Bearer tokens (mobile).** The session code supports a bearer token for phones (not wired to a login screen in this edition). The token is held by the client
-   and cannot be cleared server-side except by revoking the session.
-10. **Unexpected errors are returned to the client.** The generic 500 branch of
-   `errorResponse` (`src/lib/backend/api-response.ts`) sends the raw error message in the
-   response body and logs the error. In production this should be a fixed message.
-11. **Realtime publish has no permission check.** `POST /api/realtime/publish` uses
-    `withAuth` only, so any signed-in user (including a member) can publish an arbitrary
-    event type and payload to their own church's realtime channel. It should require a
-    permission and validate `type` and `data`.
+9. **Bearer tokens (mobile).** The member app keeps its bearer token in browser storage
+   (see section 8), and the server cannot clear it, only revoke the session behind it.
+10. **Fixed since the first version of this guide:** unexpected errors used to return the
+    raw error message to the client. In production they now return a fixed message
+    (`errorResponse`, `src/lib/backend/api-response.ts`); the real error is logged only.
+11. **Fixed since the first version of this guide:** `POST /api/realtime/publish` used to
+    need only a login, so any member could publish events. It now requires the
+    `attendance.create` permission, accepts only the `attendance.check_in` event and caps
+    the payload (`src/app/api/realtime/publish/route.ts`, with tests).
 
 ## 8. Mobile app (review edition)
 
