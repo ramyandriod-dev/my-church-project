@@ -22,7 +22,7 @@ import {
   IconSparkles,
   IconChevronRight,
   IconHeartHandshake,
-} from "@/components/community/icons";
+} from "@/components/mobile-app/icons";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import type {

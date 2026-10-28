@@ -217,7 +217,27 @@ Listed deliberately, so your review time goes where it helps most.
     event type and payload to their own church's realtime channel. It should require a
     permission and validate `type` and `data`.
 
-## 8. Suggested review path (about 1 hour)
+## 8. Mobile app (review edition)
+
+The member app lives at `/mobile` (view it in a phone-width window or on a phone on the
+same network). Here it is limited to: sign-in, Home, Community → Prayer wall, and
+Profile. Check-in, seating, care requests, events, ideas, groups, talent and
+notifications are shown but locked, and their code is not included.
+
+| Topic | Behaviour | Where |
+|---|---|---|
+| Sign-in | Email and password only, sent to `POST /api/auth/mobile/login`. Same throttle, decoy hashing and generic error as the web login (section 4) | `src/app/api/auth/mobile/login/route.ts` |
+| Token transport | Bearer token in the response body (no cookie). Sent as `Authorization: Bearer …` on every call | `src/lib/mobile-app/api-client.ts`, `src/lib/auth/require-auth.ts` |
+| Lifetime | Short access token (`mobileAccessTokenExpiry`, about 1 hour by default). The server has a refresh endpoint (`/api/auth/refresh`), but the mobile client in this edition does not call it, so after expiry the member signs in again | `src/lib/auth/session.ts`, `src/app/api/auth/refresh` |
+| Revocation | Logout or "sign out" revokes the session row; a revoked token fails the live-session check (cached up to 30 s) | `session.ts`, `src/app/api/auth/logout` |
+| Server checks | Identical to the web: tenant and role from the database, permission per route, self-service limited to the caller's own member record | sections 3 and 5 |
+| Client storage | The token is kept in `sessionStorage` and `localStorage` so the app survives a reload. This is the usual trade-off for a bearer token: a script injected into the page could read it (see gap 3: no CSP). The web CRM avoids this with an `httpOnly` cookie | `api-client.ts` |
+
+What is not in this edition: Google sign-in and sign-up, push-notification
+registration, the Android/iOS wrappers, offline caching of private data beyond what the
+included screens need, and the music/welcome screen.
+
+## 9. Suggested review path (about 1 hour)
 
 1. `src/middleware.ts` (what it does and does not enforce)
 2. `src/lib/auth/require-auth.ts` → `session.ts` (token + live-session checks)

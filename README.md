@@ -16,7 +16,15 @@ a "not included in the review edition" page.
 | Settings | Working, except **Access and roles**, which is not included |
 | Attendance, Events, Groups, Ministries, Follow-ups, Reports, Trends | Not included |
 
-The member mobile app and the Android/iOS wrappers are not part of this edition.
+The member mobile app is included in a limited form at `/mobile` (see below). The
+Android/iOS wrappers are not part of this edition.
+
+## View the mobile app
+
+Run the project locally (see below) and open `http://localhost:3000/mobile` in a
+phone-width browser window, or on a phone on the same network. Sign in with the same
+seeded account. Home, Community → Prayer wall and Profile work, in English and Arabic;
+the other tabs and actions are visible but inactive.
 
 ## Security review
 
