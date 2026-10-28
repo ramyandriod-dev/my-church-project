@@ -18,6 +18,12 @@ a "not included in the review edition" page.
 
 The member mobile app and the Android/iOS wrappers are not part of this edition.
 
+## Security review
+
+Start with [docs/SECURITY-ARCHITECTURE.md](docs/SECURITY-ARCHITECTURE.md): diagrams of the
+trust boundaries, request lifecycle, login and session flow, and authorization, with a
+list of known gaps to challenge.
+
 ## Stack
 
 Next.js 15 (App Router), React 18, Tailwind, Prisma 5 with PostgreSQL, Vitest.
