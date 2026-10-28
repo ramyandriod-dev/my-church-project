@@ -1,0 +1,272 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 248 250 252;
+    --foreground: 15 23 42;
+  }
+  * {
+    border-color: theme(colors.gray.200);
+  }
+  body {
+    background-color: theme(colors.gray.50);
+    color: theme(colors.gray.900);
+    font-family: theme(fontFamily.sans);
+  }
+
+  [dir="rtl"] body,
+  [dir="rtl"] {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Tahoma, "Cairo", sans-serif;
+    letter-spacing: 0;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 font-medium transition-all duration-150 ease-out;
+    @apply focus:outline-none focus:ring-2 focus:ring-offset-2;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-sm {
+    @apply h-8 px-3 text-sm rounded-md;
+  }
+
+  .btn-md {
+    @apply h-10 px-4 text-sm rounded-lg;
+  }
+
+  .btn-lg {
+    @apply h-12 px-6 text-base rounded-lg;
+  }
+
+  .btn-primary {
+    @apply bg-blue-500 text-white hover:bg-blue-600 focus:ring-blue-500;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 focus:ring-gray-500;
+  }
+
+  .btn-ghost {
+    @apply text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:ring-gray-500;
+  }
+
+  .btn-danger {
+    @apply bg-coral-500 text-white hover:bg-coral-600 focus:ring-coral-500;
+  }
+
+  .input {
+    @apply w-full h-10 px-3 text-sm rounded-lg border border-gray-200;
+    @apply bg-white text-gray-900 placeholder:text-gray-400;
+    @apply transition-all duration-150 ease-out;
+    @apply focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500;
+    @apply disabled:bg-gray-50 disabled:cursor-not-allowed;
+  }
+
+  .input-error {
+    @apply border-coral-500 focus:ring-coral-500 focus:border-coral-500;
+  }
+
+  .card {
+    @apply bg-white rounded-xl border border-gray-200;
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+  }
+
+  .card-hover {
+    @apply transition-all duration-150;
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+  }
+  .card-hover:hover {
+    box-shadow: 0 4px 8px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.06);
+    @apply border-gray-300;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-medium rounded-full;
+  }
+
+  .badge-blue {
+    @apply bg-blue-50 text-blue-700;
+  }
+
+  .badge-green {
+    @apply bg-mint-50 text-mint-700;
+  }
+
+  .badge-yellow {
+    @apply bg-gold-50 text-gold-700;
+  }
+
+  .badge-red {
+    @apply bg-coral-50 text-coral-700;
+  }
+
+  .badge-purple {
+    @apply bg-purple-50 text-purple-700;
+  }
+
+  .badge-gray {
+    @apply bg-gray-100 text-gray-600;
+  }
+
+  .table {
+    @apply w-full text-sm text-start;
+  }
+
+  .table thead {
+    @apply border-b border-gray-200;
+  }
+
+  .table th {
+    @apply px-4 py-3 font-medium text-gray-500 text-start;
+  }
+
+  .table td {
+    @apply px-4 py-3 text-start;
+  }
+
+  .table tbody tr {
+    @apply border-b border-gray-100 hover:bg-gray-50;
+  }
+
+  .dropdown {
+    @apply absolute z-50 w-48 bg-white rounded-xl border border-gray-100 shadow-dropdown;
+    @apply py-1 mt-1 text-start;
+  }
+
+  .dropdown-item {
+    @apply flex items-center gap-2 px-4 py-2 text-sm text-gray-700 text-start;
+    @apply hover:bg-gray-50 cursor-pointer transition-colors duration-150;
+  }
+
+  .skeleton {
+    @apply animate-pulse bg-gray-200 rounded;
+  }
+
+  .skeleton-shimmer {
+    background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .loading-overlay {
+    transition: opacity 300ms ease-in-out;
+  }
+
+  .btn:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  .pulse-urgent {
+    animation: pulse-urgent 2.5s ease-in-out infinite;
+  }
+
+  .pulse-urgent-badge {
+    animation: pulse-urgent-badge 2s ease-in-out infinite;
+  }
+
+  .pulse-urgent-row {
+    animation: pulse-urgent-row 3s ease-in-out infinite;
+  }
+
+  @keyframes pulse-urgent {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  @keyframes pulse-urgent-badge {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.02); }
+  }
+
+  @keyframes pulse-urgent-row {
+    0%, 100% { background-color: rgba(254, 226, 226, 0.3); }
+    50% { background-color: rgba(254, 226, 226, 0.6); }
+  }
+
+  /*
+   * Check In attention flash.
+   *
+   * Rendered on an overlay element rather than the tile itself, because the
+   * tile's Tailwind `ring` is implemented with `box-shadow` and an animated
+   * `box-shadow` on the tile would wipe it out. 1.8s per cycle also keeps the
+   * flash far below the 3 Hz photosensitivity threshold.
+   */
+  .action-flash {
+    animation: action-flash 1.8s ease-in-out infinite;
+  }
+
+  .action-flash-badge {
+    animation: action-flash-badge 1.8s ease-in-out infinite;
+  }
+
+  @keyframes action-flash {
+    0%, 100% {
+      box-shadow: inset 0 0 0 0 rgba(176, 141, 87, 0);
+      background-color: rgba(255, 255, 255, 0);
+    }
+    45%, 55% {
+      box-shadow: inset 0 0 0 2.5px rgba(176, 141, 87, 0.8);
+      background-color: rgba(255, 255, 255, 0.14);
+    }
+  }
+
+  @keyframes action-flash-badge {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.08); }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+
+/* ─── Member app: calm motion & skeletons ─────────────────────────── */
+/* Opacity only, and no fill mode: a transform animation (even one that ends at "none")
+   makes fixed-position windows inside it anchor to this wrapper instead of the screen. */
+.mobile-screen-enter {
+  animation: mobile-screen-fade 0.22s ease-out;
+}
+@keyframes mobile-screen-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.mobile-rise {
+  animation: mobile-rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.mobile-skeleton {
+  background: linear-gradient(90deg, #f1ece0 0%, #f9f4e9 50%, #f1ece0 100%);
+  background-size: 200% 100%;
+  animation: mobile-shimmer 1.6s ease-in-out infinite;
+}
+[data-mobile-theme="dark"] .mobile-skeleton {
+  background: linear-gradient(90deg, #1c3048 0%, #243c58 50%, #1c3048 100%);
+  background-size: 200% 100%;
+}
+@keyframes mobile-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes mobile-rise {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes mobile-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

@@ -1,0 +1,41 @@
+# OpenNext
+.open-next
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+
+.env*
+!.env.example
+
+.next/
+node_modules/.env.local
+.wrangler/
+
+node_modules/
+tsconfig.tsbuildinfo
+.next/
+.wrangler/
+.env.local
+
+# macOS
+.DS_Store
+
+# Android build outputs & gradle cache
+.gradle/
+android/.gradle/
+android/app/build/
+android/build/
+*.apk
+.firebase-service-account.json
+
+# Local scratch files that must never be committed
+cookie.txt
+
+# iOS build output (the Xcode project is generated from ios/project.yml)
+ios/*.xcodeproj
+ios/build/
+ios/DerivedData/
+ios/**/xcuserdata/
+ios/HeliopolisChurch/Info.plist

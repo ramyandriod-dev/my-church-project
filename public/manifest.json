@@ -1,0 +1,19 @@
+{
+  "name": "كنيسة مصر الجديدة الإنجيلية - Heliopolis Evangelical Church",
+  "short_name": "Heliopolis Church",
+  "description": "تطبيق أعضاء كنيسة مصر الجديدة الإنجيلية للتواصل والخدمات وتسجيل الحضور",
+  "start_url": "/mobile",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0B1528",
+  "theme_color": "#1E3A8A",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/church-banner.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
+  ]
+}

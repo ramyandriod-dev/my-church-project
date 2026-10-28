@@ -1,0 +1,1007 @@
+// ─── Church Management Platform — Prisma Schema ──────────────
+// Foundation schema: multi-tenant, client-independent backend.
+// Both web dashboard and future mobile app share this schema.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Multi-Tenant Core ───────────────────────────────────────
+
+model Tenant {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(200)
+  slug      String   @unique @db.VarChar(100)
+  domain    String?  @unique @db.VarChar(255)
+  logoUrl   String?  @db.VarChar(500)
+  settings  Json     @default("{}")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  users               User[]
+  members             Member[]
+  services            Service[]
+  groups              Group[]
+  ministries          Ministry[]
+  events              ChurchEvent[]
+  attendance          AttendanceRecord[]
+  attendanceException AttendanceException[]
+  seatReservations    SeatReservation[]
+  followUps           FollowUp[]
+  followUpActivities  FollowUpActivity[]
+  shepherdingRecords  ShepherdingRecord[]
+  prayerRequests      PrayerRequest[]
+  families            Family[]              @relation("FamilyTenant")
+  familyRelationships FamilyRelationship[]
+  auditLogs           AuditLog[]
+  skills              Skill[]
+  talentProfiles      TalentProfile[]
+  memberSkills        MemberSkill[]
+  ideas               Idea[]
+  Message             Message[]
+  announcements       Announcement[]
+  prayerWallPosts     PrayerWallPost[]
+  prayerWallPrayers   PrayerWallPrayer[]
+  rolePermissions     RolePermission[]
+  roleRequests        RoleRequest[]
+
+  @@map("tenants")
+}
+
+// ─── Authentication ──────────────────────────────────────────
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  email         String    @db.VarChar(255)
+  passwordHash  String?   @map("password_hash") @db.VarChar(255)
+  name          String    @db.VarChar(100)
+  role          String    @default("member") @db.VarChar(50)
+  avatarUrl     String?   @map("avatar_url") @db.Text
+  emailVerified DateTime? @map("email_verified")
+  lastLoginAt   DateTime? @map("last_login_at")
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  /// Links this login to the church directory Member it belongs to.
+  /// Nullable: staff accounts and unlinked logins have no directory record.
+  memberId String? @map("member_id") @db.Uuid
+
+  // Relations
+  tenant                    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sessions                  Session[]
+  ledGroups                 Group[]             @relation("GroupLeader")
+  ledMinistries             Ministry[]          @relation("MinistryLeader")
+  assignedFollowUps         FollowUp[]          @relation("FollowUpAssignee")
+  createdFollowUpActivities FollowUpActivity[]  @relation("FollowUpActivityCreator")
+  assignedShepherding       ShepherdingRecord[] @relation("ShepherdingAssignee")
+  assignedPrayerRequests    PrayerRequest[]     @relation("PrayerAssignedShepherd")
+  auditLogs                 AuditLog[]
+  ownedIdeas                Idea[]              @relation("IdeaOwner")
+  reviewedIdeas             Idea[]              @relation("IdeaStatusChangedBy")
+  talentProfilesUpdated     TalentProfile[]     @relation("TalentProfileUpdatedBy")
+  /// Messages this login sent. Attribution only — see the Message model for why
+  /// the sender name is snapshotted alongside this pointer.
+  sentMessages              Message[]           @relation("MessageSender")
+  reviewedPrayerWallPosts   PrayerWallPost[]    @relation("PrayerWallReviewer")
+  prayerWallPrayers         PrayerWallPrayer[]
+  roleRequests              RoleRequest[]       @relation("RoleRequester")
+  reviewedRoleRequests      RoleRequest[]       @relation("RoleRequestReviewer")
+  /// Simple FK on memberId alone, NOT compound on (memberId, tenantId).
+  ///
+  /// A compound key is not available here: onDelete: SetNull would have to
+  /// null tenantId as well, and that column is non-nullable. Tenant scope for
+  /// this link is therefore enforced in application code — every read and write
+  /// of a self-service profile checks member.tenantId === user.tenantId. The
+  /// database can still hold a cross-tenant pair, so that check is mandatory and
+  /// must not be dropped.
+  member                    Member?             @relation("UserMember", fields: [memberId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, email])
+  @@unique([memberId])
+  /// Referenced by the compound foreign keys on TalentProfile and Idea.
+  @@unique([id, tenantId])
+  @@index([tenantId])
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  token     String   @unique @db.VarChar(500)
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// Set when the session is explicitly ended. A non-null value means the token
+  /// is refused even though its own `exp` has not passed, which is what makes
+  /// "sign out this device" and "sign out everywhere" possible. Without it the
+  /// table is only an audit trail and a stolen token stays good for a week.
+  revokedAt DateTime? @map("revoked_at")
+
+  /// Last time this session authenticated a request. Lets an operator see which
+  /// of a user's devices are actually in use.
+  lastSeenAt DateTime? @map("last_seen_at")
+
+  /// How this session was presented. A mobile Bearer token is a very different
+  /// risk from a browser cookie — it is held in app storage, is not cleared by
+  /// closing the app, and cannot be protected by `httpOnly` — so the two are
+  /// tracked separately and given different lifetimes.
+  kind String @default("web") @db.VarChar(20)
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  // Deliberately no `@@index([userId, revokedAt])`. Revocation checks look a
+  // session up by `token`, which is already unique and indexed, and the only
+  // other reads ("list this user's devices", "revoke them all") are rare
+  // operator actions. Prisma cannot express the partial index that actually
+  // covers those, so declaring a full one here would make every `migrate dev`
+  // want to add a redundant index that nothing queries.
+  @@map("sessions")
+}
+
+/// Persistent failed-login state for one account.
+///
+/// Lives in the database rather than in memory because the application runs on
+/// Cloudflare Workers, where isolates are short-lived and there is more than one
+/// edge location — an in-memory counter resets on every request that lands
+/// elsewhere and provides no protection at all.
+model AuthThrottle {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// SHA-256 of the lowercased email address. The plaintext address is
+  /// deliberately not stored: this is the most attractive table in the schema to
+  /// read, and it has no reason to become a directory of who has an account.
+  ///
+  /// The index is named explicitly because this table already exists in the live
+  /// database, where it was created by a schema push rather than by a migration.
+  /// Without `map`, Prisma would expect `auth_throttles_key_key` and every
+  /// subsequent `migrate dev` would propose renaming an index that is already
+  /// doing its job.
+  key String @unique(map: "auth_throttles_key_unique") @db.VarChar(64)
+
+  failures        Int       @default(0)
+  windowStartedAt DateTime  @default(now()) @map("window_started_at")
+  lockedUntil     DateTime? @map("locked_until")
+  lastFailureAt   DateTime? @map("last_failure_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([lockedUntil])
+  @@map("auth_throttles")
+}
+
+/// Persistent FCM device push registrations.
+///
+/// Lives in PostgreSQL so all Cloudflare Worker isolates and edge instances
+/// can reliably lookup device tokens across mobile app registration and
+/// staff CRM message dispatch.
+model DevicePushToken {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  memberId    String?  @map("member_id") @db.Uuid
+  token       String   @unique(map: "device_push_tokens_token_unique") @db.VarChar(500)
+  platform    String   @default("android") @db.VarChar(20)
+  deviceModel String?  @map("device_model") @db.VarChar(100)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([memberId])
+  @@index([userId])
+  @@map("device_push_tokens")
+}
+
+// ─── Members ─────────────────────────────────────────────────
+
+model Member {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  firstName String   @map("first_name") @db.VarChar(50)
+  lastName  String   @map("last_name") @db.VarChar(50)
+  email     String   @db.VarChar(255)
+  phone     String?  @db.VarChar(20)
+  avatarUrl String?  @map("avatar_url") @db.Text
+  status    String   @default("active") @db.VarChar(20)
+  ministry  String?  @db.VarChar(100)
+  groupId   String?  @map("group_id") @db.Uuid
+  joinedAt  DateTime @default(now()) @map("joined_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  tenant              Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  group               Group?                @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  attendance          AttendanceRecord[]
+  attendanceException AttendanceException[]
+  followUps           FollowUp[]
+  shepherdingRecords  ShepherdingRecord[]
+  prayerRequests      PrayerRequest[]
+  familyHeadOf        Family[]              @relation("FamilyHead")
+  familyRelationsFrom FamilyRelationship[]  @relation("RelationshipFrom")
+  familyRelationsTo   FamilyRelationship[]  @relation("RelationshipTo")
+  talentProfile       TalentProfile?
+  skills              MemberSkill[]
+  submittedIdeas      Idea[]                @relation("IdeaSubmitter")
+  prayerWallPosts     PrayerWallPost[]      @relation("PrayerWallAuthor")
+  seatReservations    SeatReservation[]
+  /// Every message in this member's conversation, from either side.
+  messages            Message[]
+  /// The login, if any, linked to this directory record.
+  userAccount         User?                 @relation("UserMember")
+
+  @@unique([tenantId, email])
+  /// Referenced by User's compound foreign key. Required for that FK to exist,
+  /// and harmless on its own: id is already the primary key.
+  @@unique([id, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, groupId])
+  @@map("members")
+}
+
+// ─── Attendance ──────────────────────────────────────────────
+
+model Service {
+  id                 String    @id @default(uuid()) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  name               String    @db.VarChar(200)
+  startTime          DateTime  @map("start_time")
+  endTime            DateTime? @map("end_time")
+  expectedAttendance Int?      @map("expected_attendance")
+  status             String    @default("scheduled") @db.VarChar(20)
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  tenant              Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  attendance          AttendanceRecord[]
+  attendanceException AttendanceException[]
+  seatReservations    SeatReservation[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@map("services")
+}
+
+model AttendanceRecord {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  memberId     String    @map("member_id") @db.Uuid
+  serviceId    String    @map("service_id") @db.Uuid
+  checkInTime  DateTime  @map("check_in_time")
+  checkOutTime DateTime? @map("check_out_time")
+  method       String    @default("manual") @db.VarChar(20)
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  member  Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, memberId, serviceId])
+  @@index([tenantId])
+  @@index([tenantId, serviceId])
+  @@index([tenantId, memberId])
+  @@index([tenantId, checkInTime])
+  @@map("attendance_records")
+}
+
+// ─── Attendance Exceptions ───────────────────────────────────
+// Explicit, never-inferred exceptions to attendance expectation.
+//   status "excused"      → member was expected but explicitly excused (reason required)
+//   status "not_expected" → member was not expected for this service (no reason)
+// MISSING is derived, never stored: expected + record absent + no exception.
+
+model AttendanceException {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  memberId   String   @map("member_id") @db.Uuid
+  serviceId  String   @map("service_id") @db.Uuid
+  status     String   @default("excused") @db.VarChar(20)
+  reason     String?  @db.VarChar(100)
+  note       String?  @db.Text
+  recordedBy String   @map("recorded_by") @db.Uuid
+  recordedAt DateTime @default(now()) @map("recorded_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  member  Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, memberId, serviceId])
+  @@index([tenantId])
+  @@index([tenantId, serviceId])
+  @@index([tenantId, memberId])
+  @@map("attendance_exceptions")
+}
+
+// ─── Groups ──────────────────────────────────────────────────
+
+model Group {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  name            String   @db.VarChar(100)
+  description     String?  @db.Text
+  leaderId        String?  @map("leader_id") @db.Uuid
+  ministryId      String?  @map("ministry_id") @db.Uuid
+  memberCount     Int      @default(0) @map("member_count")
+  maxCapacity     Int?     @map("max_capacity")
+  meetingSchedule String?  @map("meeting_schedule") @db.VarChar(200)
+  status          String   @default("active") @db.VarChar(20)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  leader   User?     @relation("GroupLeader", fields: [leaderId], references: [id], onDelete: SetNull)
+  ministry Ministry? @relation(fields: [ministryId], references: [id], onDelete: SetNull)
+  members  Member[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@map("groups")
+}
+
+// ─── Ministries ──────────────────────────────────────────────
+
+model Ministry {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  name            String   @db.VarChar(100)
+  description     String?  @db.Text
+  leaderId        String?  @map("leader_id") @db.Uuid
+  icon            String?  @db.VarChar(50)
+  color           String?  @db.VarChar(20)
+  memberCount     Int      @default(0) @map("member_count")
+  meetingSchedule String?  @map("meeting_schedule") @db.VarChar(200)
+  status          String   @default("active") @db.VarChar(20)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  leader User?   @relation("MinistryLeader", fields: [leaderId], references: [id], onDelete: SetNull)
+  groups Group[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@map("ministries")
+}
+
+// ─── Events ──────────────────────────────────────────────────
+
+model ChurchEvent {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  title        String    @db.VarChar(200)
+  description  String?   @db.Text
+  startTime    DateTime  @map("start_time")
+  endTime      DateTime? @map("end_time")
+  location     String?   @db.VarChar(200)
+  category     String?   @db.VarChar(100)
+  maxAttendees Int?      @map("max_attendees")
+  status       String    @default("upcoming") @db.VarChar(20)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@map("church_events")
+}
+
+// ─── Follow-Ups ──────────────────────────────────────────────
+
+model FollowUp {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  memberId    String    @map("member_id") @db.Uuid
+  assignedTo  String?   @map("assigned_to") @db.Uuid
+  type        String    @default("general") @db.VarChar(50)
+  reason      String    @db.VarChar(500)
+  notes       String?   @db.Text
+  priority    String    @default("medium") @db.VarChar(20)
+  status      String    @default("open") @db.VarChar(20)
+  dueDate     DateTime? @map("due_date")
+  completedAt DateTime? @map("completed_at")
+  lastContact DateTime? @map("last_contact")
+  nextAction  String?   @map("next_action") @db.VarChar(500)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  member     Member             @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  assignee   User?              @relation("FollowUpAssignee", fields: [assignedTo], references: [id], onDelete: SetNull)
+  activities FollowUpActivity[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, memberId])
+  @@map("follow_ups")
+}
+
+model FollowUpActivity {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  followUpId  String   @map("follow_up_id") @db.Uuid
+  contactType String   @map("contact_type") @db.VarChar(50)
+  notes       String   @db.Text
+  contactDate DateTime @default(now()) @map("contact_date")
+  createdById String   @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  followUp  FollowUp @relation(fields: [followUpId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("FollowUpActivityCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, followUpId])
+  @@index([tenantId, createdById])
+  @@map("follow_up_activities")
+}
+
+// ─── Family ───────────────────────────────────────────────────
+
+// A family is an explicit grouping of related members, owned by one tenant.
+//
+// Membership is NEVER hard-coded on Member: the same family is reachable from
+// any member through FamilyRelationship, so opening the father, the mother or
+// a child all resolve to this same record.
+//
+// headMemberId is the ONLY signal that a member represents the family. It is
+// deliberately nullable and is never inferred from a `father` relationship:
+// a father who is not the designated head is still just a father.
+//
+// familyPhotoUrl belongs to the FAMILY and is deliberately not duplicated
+// onto member rows. Consumers fall back to the head member's avatar.
+model Family {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  name           String   @db.VarChar(200)
+  /// Optional family photo. Null means consumers fall back to member avatars.
+  familyPhotoUrl String?  @map("family_photo_url") @db.VarChar(500)
+  /// Explicitly designated family representative. Null = no head designated.
+  headMemberId   String?  @map("head_member_id") @db.Uuid
+  notes          String?  @db.Text
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  // Relations
+  tenant        Tenant               @relation("FamilyTenant", fields: [tenantId], references: [id], onDelete: Cascade)
+  headMember    Member?              @relation("FamilyHead", fields: [headMemberId], references: [id], onDelete: SetNull)
+  relationships FamilyRelationship[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([tenantId, headMemberId])
+  @@map("families")
+}
+
+// Directional types (father/mother/guardian/child) are stored as written.
+// Symmetric types (spouse/sibling) are normalised by the service so that
+// (A,B) and (B,A) collapse onto the same unique key, which is what makes
+// duplicate spouse records impossible at the database level.
+//
+// The unique key also prevents an exact duplicate of any relationship type.
+// Self-relationships and cross-tenant relationships are rejected by the
+// service before this table is reached.
+model FamilyRelationship {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  familyId     String   @map("family_id") @db.Uuid
+  fromMemberId String   @map("from_member_id") @db.Uuid
+  toMemberId   String   @map("to_member_id") @db.Uuid
+  /// father | mother | child | spouse | sibling | guardian
+  type         String   @db.VarChar(20)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  // Relations
+  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  family     Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  fromMember Member @relation("RelationshipFrom", fields: [fromMemberId], references: [id], onDelete: Cascade)
+  toMember   Member @relation("RelationshipTo", fields: [toMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, familyId, fromMemberId, toMemberId, type])
+  @@index([tenantId, familyId])
+  @@index([tenantId, fromMemberId])
+  @@index([tenantId, toMemberId])
+  @@map("family_relationships")
+}
+
+// ─── Shepherding ─────────────────────────────────────────────
+
+model ShepherdingRecord {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  memberId    String    @map("member_id") @db.Uuid
+  assignedTo  String?   @map("assigned_to") @db.Uuid
+  status      String    @default("stable") @db.VarChar(20)
+  priority    String    @default("medium") @db.VarChar(20)
+  notes       String?   @db.Text
+  lastContact DateTime? @map("last_contact")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  member   Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  shepherd User?  @relation("ShepherdingAssignee", fields: [assignedTo], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, memberId])
+  @@map("shepherding_records")
+}
+
+// ─── Prayer Requests ─────────────────────────────────────────
+
+model PrayerRequest {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  memberId         String   @map("member_id") @db.Uuid
+  category         String   @db.VarChar(100)
+  request          String   @db.Text
+  status           String   @default("new") @db.VarChar(20)
+  assignedShepherd String?  @map("assigned_shepherd") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  member   Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  shepherd User?  @relation("PrayerAssignedShepherd", fields: [assignedShepherd], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, memberId])
+  @@map("prayer_requests")
+}
+
+// ─── Community: Talent & Ideas ───────────────────────────────
+//
+// "Discover what our people can do, and discover what our people
+//  are thinking."
+//
+// Two independent halves that share only the tenant boundary:
+//
+//   Talent  — a member's own submitted expertise, discoverable by staff
+//   Ideas   — community-submitted proposals moving through a review queue
+//
+// PRIVACY MODEL
+// Everything a member types here is COMMUNITY-DISCOVERY data and nothing else.
+// None of it is pastoral: no prayer requests, no confidential follow-ups, no
+// shepherding notes. `TalentProfile.isDiscoverable` is the member's explicit
+// opt-in to appearing in the directory; when it is false the record is still
+// stored and still editable by its owner, but it is excluded from every
+// directory listing and from search results.
+//
+// EXTENSIBILITY
+// The normalized `MemberSkill` link is the join an `Opportunity` (a future
+// "we need a volunteer photographer" workflow) would match through. Adding one
+// requires no change to TalentProfile, Skill or MemberSkill.
+
+/// A tenant-scoped skill, so each church curates its own vocabulary instead of
+/// sharing one global list. Members may add custom skills; the seeded ones are
+/// only suggestions.
+model Skill {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  name        String   @db.VarChar(100)
+  /// Controlled grouping ("Technology", "Creative", "Trades"...). Free text so
+  /// a church can add its own grouping without a schema change.
+  category    String?  @db.VarChar(60)
+  /// True for the seeded starter vocabulary. A custom skill is a first-class
+  /// row too — suggestions are not a different kind of skill.
+  isSuggested Boolean  @default(false) @map("is_suggested")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  tenant  Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members MemberSkill[]
+
+  @@unique([tenantId, name])
+  /// Referenced by MemberSkill's compound foreign key. Harmless on its own: id
+  /// is already the primary key.
+  @@unique([id, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, category])
+  @@map("skills")
+}
+
+/// A member's self-submitted expertise. One row per member, owned by them.
+///
+/// Profession is deliberately "controlled category + free value": the category
+/// gives the directory something to group and filter on, while the value stays
+/// open so "Underwater Basket Weaver" is representable without a schema change.
+/// A fixed profession enum would have forced the church to pick the lesser of
+/// two wrong labels for a real person.
+///
+/// Willingness lives here rather than in its own table because it is a single
+/// per-member fact about the same subject; a 1:1 table would add a join without
+/// adding information.
+model TalentProfile {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  memberId String @map("member_id") @db.Uuid
+
+  /// Controlled profession grouping, e.g. "Technology". Null = unspecified.
+  professionCategory String? @map("profession_category") @db.VarChar(60)
+  /// What the person actually does. Free text, e.g. "Software Engineer".
+  profession         String? @db.VarChar(150)
+  /// The member's own description of relevant experience.
+  experience         String? @db.Text
+  /// Optional structured figure so "10 years" is filterable, not just prose.
+  yearsExperience    Int?    @map("years_experience")
+  /// yes | maybe | not_currently
+  willingness        String  @default("maybe") @db.VarChar(20)
+  /// Free text naming the areas the member is willing to help in.
+  willingAreas       String? @map("willing_areas") @db.Text
+  /// The member's opt-in to the staff-facing directory. When false the profile
+  /// is invisible to search and listing but still fully editable by its owner.
+  isDiscoverable     Boolean @default(true) @map("is_discoverable")
+  /// Who last wrote this. Retained so an administrative correction is always
+  /// attributable to a person, never anonymous.
+  updatedByUserId    String? @map("updated_by_user_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// Compound FK: a talent profile can never point at a member in another
+  /// tenant, so cross-tenant member/talent relationships are unrepresentable.
+  member    Member @relation(fields: [memberId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  /// Attribution only — who last wrote the profile. A single-column FK because
+  /// the pointer is meant to be cleared when that login is removed; tenant
+  /// matching is enforced by the service on every write.
+  updatedBy User?  @relation("TalentProfileUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([memberId])
+  /// Satisfies the 1:1 compound foreign key above.
+  @@unique([memberId, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, isDiscoverable])
+  @@index([tenantId, willingness])
+  @@index([tenantId, professionCategory])
+  @@map("talent_profiles")
+}
+
+/// Normalized member <-> skill relationship. Skills are never a comma-separated
+/// string: the search, the directory facets and any future Opportunity matching
+/// all need to query them relationally.
+model MemberSkill {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  memberId  String   @map("member_id") @db.Uuid
+  skillId   String   @map("skill_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// Compound FKs on both sides, so a skill link cannot attach one tenant's
+  /// member to another tenant's skill. Matching on memberId alone would let a
+  /// row claim a skill belonging to a different tenant.
+  member Member @relation(fields: [memberId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  skill  Skill  @relation(fields: [skillId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([memberId, skillId])
+  @@index([tenantId])
+  @@index([tenantId, skillId])
+  @@map("member_skills")
+}
+
+/// A community idea, submitted by a member from the mobile app and moved
+/// through a deliberately small workflow by staff.
+///
+/// `internalNotes` is staff-only and is stripped from every response the caller
+/// is not authorised to manage, so an idea's working notes never leak to the
+/// member who proposed it.
+model Idea {
+  id                  String    @id @default(uuid()) @db.Uuid
+  tenantId            String    @map("tenant_id") @db.Uuid
+  submittedByMemberId String    @map("submitted_by_member_id") @db.Uuid
+  title               String    @db.VarChar(200)
+  description         String    @db.Text
+  /// Controlled category. "other" is a valid choice and is expected.
+  category            String    @db.VarChar(60)
+  /// The member's own wording when `category` is "other". Null otherwise, so a
+  /// stale custom label can never be displayed against a real category.
+  categoryOther       String?   @map("category_other") @db.VarChar(100)
+  /// new | under_review | planned | implemented | declined
+  status              String    @default("new") @db.VarChar(20)
+  /// Staff-only working notes. Never returned to a caller without ideas.manage.
+  internalNotes       String?   @map("internal_notes") @db.Text
+  /// Optional staff owner accountable for moving the idea forward.
+  ownerId             String?   @map("owner_id") @db.Uuid
+  statusChangedAt     DateTime? @map("status_changed_at")
+  statusChangedById   String?   @map("status_changed_by_id") @db.Uuid
+  implementedAt       DateTime? @map("implemented_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  // Compound FK on the submitter, so an idea can never attribute itself to a
+  // member of another tenant. `owner` and `statusChangedBy` are attribution
+  // only: single-column FKs so they clear when that login is removed, with the
+  // tenant checked by the service on every write.
+  tenant          Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  submittedBy     Member @relation("IdeaSubmitter", fields: [submittedByMemberId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  owner           User?  @relation("IdeaOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  statusChangedBy User?  @relation("IdeaStatusChangedBy", fields: [statusChangedById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, category])
+  @@index([tenantId, submittedByMemberId])
+  @@index([tenantId, createdAt])
+  @@map("ideas")
+}
+
+/// One message in the conversation between church staff and a member.
+///
+/// A thread is deliberately NOT its own table. It is simply every message
+/// sharing a `memberId`. For the way a church actually uses this — a line of
+/// contact about somebody's talent, their availability, or a request for help —
+/// that is the entire shape of the relationship, and a separate Thread table
+/// would add a join and a second object to authorise without adding any
+/// information the rows do not already carry.
+///
+/// ─── Why senderKind is stored and not derived ───────────────
+///
+/// The two directions of a thread have different readers: a member reads what
+/// staff wrote, staff read what the member wrote back. Read state therefore has
+/// to be attributable to a side. Deriving the side from `senderUserId` (staff
+/// logins usually have no linked Member row, member logins do) would stop
+/// working the moment a staff account is removed and the FK is cleared — at
+/// which point the unread count would silently start counting the wrong side of
+/// the conversation. Storing the direction makes the count durable.
+///
+/// ─── Why senderName is denormalised ─────────────────────────
+///
+/// "Who said this" has to outlive the login. A record of a conversation with a
+/// real person should not quietly become anonymous because a staff account was
+/// deleted, so the display name is snapshotted and the FK is allowed to clear.
+model Message {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  /// The member the conversation is about. Doubles as the thread key.
+  memberId       String    @map("member_id") @db.Uuid
+  /// staff | member — which side wrote it, and therefore who has yet to read it.
+  senderKind     String    @map("sender_kind") @db.VarChar(10)
+  /// Cleared when the sending login is removed. `senderKind` and `senderName`
+  /// keep the message readable and keep it correctly addressed without it.
+  senderUserId   String?   @map("sender_user_id") @db.Uuid
+  /// Snapshot of the sender's display name at the time of sending.
+  senderName     String    @map("sender_name") @db.VarChar(120)
+  body           String    @db.Text
+  /// in_app | whatsapp — where the message was raised.
+  ///
+  /// A `wa.me` link hands the text to WhatsApp on the sender's own device and
+  /// reports nothing back, so a `whatsapp` row records that a request was MADE,
+  /// not that it was delivered or read. The UI labels it accordingly rather than
+  /// implying a delivery receipt that does not exist.
+  channel        String    @default("in_app") @db.VarChar(20)
+  /// When the intended recipient read it. Null means unread.
+  ///
+  /// One column is enough because `senderKind` already fixes which side the
+  /// recipient is on, so "read" is never ambiguous between the two directions.
+  readAt         DateTime? @map("read_at")
+  /// Set when this message was delivered as part of an announcement.
+  announcementId String?   @map("announcement_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// Compound FK, so a message can never be filed against a member belonging to
+  /// another tenant. One church's conversation cannot be addressed to another
+  /// church's member even by a bug.
+  member       Member        @relation(fields: [memberId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  /// Attribution only, single-column, SetNull: the conversation must outlive the
+  /// sending account. Tenant scope for this pointer is not enforced by the
+  /// database, but it is never used for authorisation — `memberId` is.
+  sender       User?         @relation("MessageSender", fields: [senderUserId], references: [id], onDelete: SetNull)
+  announcement Announcement? @relation(fields: [announcementId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  /// The thread read: one member's conversation in order.
+  @@index([tenantId, memberId, createdAt])
+  /// Serves the unread count on both sides (staff messages awaiting a member,
+  /// member messages awaiting staff) without scanning the thread.
+  @@index([tenantId, memberId, senderKind, readAt])
+  @@index([announcementId])
+  /// The staff inbox: newest activity across every thread in the church.
+  @@index([tenantId, senderKind, readAt])
+  @@map("messages")
+}
+
+// ─── Audit Log ───────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  userId     String?  @map("user_id") @db.Uuid
+  action     String   @db.VarChar(100)
+  resource   String   @db.VarChar(100)
+  resourceId String?  @map("resource_id") @db.Uuid
+  oldValues  Json?    @map("old_values")
+  newValues  Json?    @map("new_values")
+  ipAddress  String?  @map("ip_address") @db.VarChar(45)
+  userAgent  String?  @map("user_agent") @db.VarChar(500)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, resource, resourceId])
+  @@index([tenantId, userId])
+  @@index([tenantId, createdAt])
+  @@map("audit_logs")
+}
+
+/// A one-to-many message from church staff, delivered into each recipient's
+/// in-app thread (and as a push notification). The audience is stored as the
+/// selectors the sender chose, plus a short readable summary, so the history stays
+/// meaningful even after members or groups change.
+model Announcement {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  title           String   @db.VarChar(160)
+  body            String   @db.Text
+  /// The sender's selectors (everyone / roles / groups / ministries / statuses).
+  audience        Json
+  /// e.g. "Pastors, Youth Group". Human-readable snapshot.
+  audienceSummary String   @map("audience_summary") @db.VarChar(300)
+  recipientCount  Int      @map("recipient_count")
+  /// Devices the push notification reached (0 if push is not configured).
+  pushDelivered   Int      @default(0) @map("push_delivered")
+  senderUserId    String?  @map("sender_user_id") @db.Uuid
+  senderName      String   @map("sender_name") @db.VarChar(120)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([tenantId, createdAt])
+  @@map("announcements")
+}
+
+// ─── Community: Prayer Wall ───────────────────────────────────
+//
+// Members share a prayer; a pastor or leader approves it before anyone else
+// sees it. The wall shows no name unless the author chose to show it
+// (`showName`); otherwise the author is kept for moderation and for the
+// author's own "my prayers" view only.
+
+/// One prayer shared to the wall. `kind` leaves room for praise and
+/// answered-prayer stories, which will use the same approval queue.
+model PrayerWallPost {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  authorMemberId   String    @map("author_member_id") @db.Uuid
+  kind             String    @default("prayer") @db.VarChar(20)
+  body             String    @db.Text
+  /// The author asked for their name to appear on the wall. Off by default.
+  showName         Boolean   @default(false) @map("show_name")
+  /// pending | approved | rejected | archived
+  status           String    @default("pending") @db.VarChar(20)
+  reviewedByUserId String?   @map("reviewed_by_user_id") @db.Uuid
+  reviewedAt       DateTime? @map("reviewed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  tenant     Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  author     Member             @relation("PrayerWallAuthor", fields: [authorMemberId], references: [id], onDelete: Cascade)
+  reviewedBy User?              @relation("PrayerWallReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  prayers    PrayerWallPrayer[]
+
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, authorMemberId])
+  @@map("prayer_wall_posts")
+}
+
+/// "I prayed for this". One row per login per prayer, so the counter cannot be
+/// inflated by tapping repeatedly.
+model PrayerWallPrayer {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  postId    String   @map("post_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  post   PrayerWallPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([tenantId])
+  @@map("prayer_wall_prayers")
+}
+
+// ─── Access & roles ───────────────────────────────────────────
+//
+// What each role may do is set in code (DEFAULT_ROLE_PERMISSIONS) and can be
+// changed per church in Settings → Access & roles. A row here replaces the
+// defaults for that role; no row means the defaults apply.
+
+/// The permissions a church has chosen for one role.
+model RolePermission {
+  tenantId        String   @map("tenant_id") @db.Uuid
+  role            String   @db.VarChar(50)
+  permissions     Json
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, role])
+  @@map("role_permissions")
+}
+
+/// Someone asking to serve as usher, leader, pastor or admin. They stay a
+/// member until a person with `roles.manage` approves.
+model RoleRequest {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  requestedRole    String    @map("requested_role") @db.VarChar(50)
+  note             String?   @db.VarChar(500)
+  /// pending | approved | rejected | cancelled
+  status           String    @default("pending") @db.VarChar(20)
+  reviewedByUserId String?   @map("reviewed_by_user_id") @db.Uuid
+  reviewedAt       DateTime? @map("reviewed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user       User   @relation("RoleRequester", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedBy User?  @relation("RoleRequestReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, createdAt])
+  @@index([userId])
+  @@map("role_requests")
+}
+
+/// A member's reservation of seats in one row of the sanctuary, for one service.
+/// It is a hold until `heldUntil` (5 minutes): after that the seats count as free
+/// again, decided when read, so nothing has to run to release them. A member or an
+/// usher confirming makes it `seated`; cancelling makes it `released`.
+model SeatReservation {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  serviceId String   @map("service_id") @db.Uuid
+  memberId  String   @map("member_id") @db.Uuid
+  sectionId String   @map("section_id") @db.VarChar(30)
+  row       String   @db.VarChar(4)
+  seatCount Int      @map("seat_count")
+  /// held | seated | released
+  status    String   @default("held") @db.VarChar(12)
+  heldUntil DateTime @map("held_until")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  member  Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, serviceId, status])
+  @@index([tenantId, memberId])
+  @@map("seat_reservations")
+}
